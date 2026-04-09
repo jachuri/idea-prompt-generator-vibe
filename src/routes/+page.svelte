@@ -5,13 +5,13 @@
     import { onMount } from "svelte";
 
     let selectedWords = $state<string[]>(["", "", ""]);
-    let generatedPrompt = $state("");
-    let showToast = $state(false);
+    let generatedPrompts = $state<string[]>([]);
+    let showToast = $state<number | null>(null);
     let isGenerating = $state(false);
 
     function rollAllWords() {
         selectedWords = getRandomWords(3);
-        generatedPrompt = "";
+        generatedPrompts = [];
     }
 
     function rerollWord(index: number) {
@@ -19,16 +19,16 @@
         const newWords = [...selectedWords];
         newWords[index] = newWord;
         selectedWords = newWords;
-        generatedPrompt = "";
+        generatedPrompts = [];
     }
 
     async function handleGeneratePrompt() {
         if (selectedWords.some((w) => !w)) return;
         const keywordStr = selectedWords.map((w) => `[${w}]`).join(", ");
-        const rawPrompt = `${keywordStr}\n\n이 세 개의 단어를 핵심 소재로 사용해서 사람들에게 영감을 줄 수 있는 아주 매력적이고 창의적인 문장(또는 짧은 텍스트)을 하나 완성해 줘. (군더더기 인사말은 빼고 결과 내용만 텍스트로 출력해)`;
+        const rawPrompt = `${keywordStr}\n\n이 세 개의 단어를 핵심 소재로 사용해서 사람들에게 영감을 줄 수 있는 아주 매력적이고 완전히 다른 관점의 문장(또는 짧은 아이디어)을 딱 3개만 만들어 줘.\n\n[출력 규칙]\n- 각 문장은 반드시 '|||' (파이프 세 개)로 완벽히 분리해.\n- 번호 매기기 금지, 인사말 금지, 제목 금지.\n- 오직 "문장1|||문장2|||문장3" 형태로만 출력해.`;
 
         isGenerating = true;
-        generatedPrompt = "";
+        generatedPrompts = [];
 
         try {
             const response = await fetch("/api/generate", {
@@ -39,25 +39,29 @@
             const data = await response.json();
 
             if (data.success) {
-                generatedPrompt = data.text;
+                generatedPrompts = data.text
+                    .split("|||")
+                    .map((s: string) => s.trim())
+                    .filter(Boolean);
             } else {
-                generatedPrompt = `API 호출 오류: ${data.error}`;
+                generatedPrompts = [`API 호출 오류: ${data.error}`];
             }
         } catch (error) {
             console.error("Fetch error:", error);
-            generatedPrompt =
-                "통신에 실패했습니다. 서버가 켜져 있는지 확인해 주세요.";
+            generatedPrompts = [
+                "통신에 실패했습니다. 서버가 켜져 있는지 확인해 주세요.",
+            ];
         } finally {
             isGenerating = false;
         }
     }
 
-    async function copyToClipboard() {
-        if (!generatedPrompt) return;
+    async function copyToClipboard(text: string, index: number) {
+        if (!text) return;
         try {
-            await navigator.clipboard.writeText(generatedPrompt);
-            showToast = true;
-            setTimeout(() => (showToast = false), 3000);
+            await navigator.clipboard.writeText(text);
+            showToast = index;
+            setTimeout(() => (showToast = null), 3000);
         } catch (err) {
             console.error("Clipboard copy failed:", err);
         }
@@ -127,7 +131,7 @@
             onclick={handleGeneratePrompt}
             disabled={isGenerating}
             class="group relative flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-lg text-white transition-all hover:scale-105 active:scale-95 shadow-xl shadow-indigo-500/20 overflow-hidden disabled:opacity-50 disabled:hover:scale-100 disabled:active:scale-100 cursor-pointer disabled:cursor-not-allowed"
-            class:opacity-50={generatedPrompt !== "" && !isGenerating}
+            class:opacity-50={generatedPrompts.length > 0 && !isGenerating}
         >
             <div
                 class="absolute inset-0 bg-gradient-to-r from-indigo-600 via-purple-600 to-emerald-600 bg-[length:200%_auto] animate-gradient"
@@ -138,46 +142,45 @@
                     마법의 문장 창조 중...
                 {:else}
                     <Sparkles size={20} class="group-hover:animate-pulse" />
-                    문장 프롬프트 만들기
+                    문장 만들기
                 {/if}
             </span>
         </button>
 
-        {#if generatedPrompt}
+        {#if generatedPrompts.length > 0}
             <div
-                class="w-full relative"
+                class="w-full flex flex-col gap-4 mt-2"
                 in:fly={{ y: 30, duration: 500 }}
                 out:fade
             >
                 <div
-                    class="absolute -top-3 left-4 bg-slate-900 px-2 text-xs font-semibold text-emerald-400 tracking-wider z-10"
+                    class="text-sm font-semibold text-emerald-400 tracking-wider mb-1 ml-4"
                 >
-                    GENERATED PROMPT
+                    GENERATED IDEAS
                 </div>
-                <div
-                    class="relative w-full bg-slate-800/80 backdrop-blur-md border border-slate-700/80 rounded-2xl p-8 shadow-2xl"
-                >
-                    <p
-                        class="text-slate-100 leading-relaxed min-h-[120px] whitespace-pre-wrap font-medium text-[15px]"
+                {#each generatedPrompts as prompt, idx}
+                    <div
+                        class="relative w-full bg-slate-800/80 backdrop-blur-md border border-slate-700/80 rounded-2xl p-6 shadow-xl flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between transition-all hover:border-indigo-500/30"
                     >
-                        {generatedPrompt}
-                    </p>
-                </div>
-
-                <div class="flex justify-end mt-4">
-                    <button
-                        onclick={copyToClipboard}
-                        class="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl text-sm font-medium transition-colors text-white shadow-sm"
-                    >
-                        {#if showToast}
-                            <Check size={16} class="text-emerald-400" />
-                            <span class="text-emerald-400">복사 완료!</span>
-                        {:else}
-                            <Copy size={16} />
-                            복사하기
-                        {/if}
-                    </button>
-                </div>
+                        <p
+                            class="text-slate-100 leading-relaxed whitespace-pre-wrap font-medium text-[15px] flex-1"
+                        >
+                            {prompt}
+                        </p>
+                        <button
+                            onclick={() => copyToClipboard(prompt, idx)}
+                            class="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-lg text-sm font-medium transition-colors text-white shadow-sm shrink-0"
+                        >
+                            {#if showToast === idx}
+                                <Check size={16} class="text-emerald-400" />
+                                <span class="text-emerald-400">복사됨!</span>
+                            {:else}
+                                <Copy size={16} />
+                                복사
+                            {/if}
+                        </button>
+                    </div>
+                {/each}
             </div>
         {/if}
     </section>
